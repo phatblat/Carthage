@@ -932,6 +932,14 @@ public func buildScheme(scheme: String, withConfiguration configuration: String,
 							return false
 						}
 					}
+					.filter { settings in
+						// Skip building for device when platform requires bitcode but bitcode is disabled
+//						if [.tvOS, .watchOS].contains(sdk.platform) {
+						if [.tvOS, .watchOS].contains(sdk) && settings.bitcodeEnabled.value == false {
+							return false
+						}
+						return true
+					}
 					.flatMap(.Concat) { settings -> SignalProducer<TaskEvent<BuildSettings>, CarthageError> in
 						if settings.bitcodeEnabled.value == true {
 							argsForBuilding.bitcodeGenerationMode = .Bitcode
@@ -972,6 +980,7 @@ public func buildScheme(scheme: String, withConfiguration configuration: String,
 			return SignalProducer(values: values)
 		}
 		.flatMap(.Concat) { platform, sdks -> SignalProducer<(Platform, [SDK]), CarthageError> in
+			debugPrint("platform: \(platform), sdks: \(sdks)")
 			let filterResult = sdkFilter(sdks: sdks, scheme: scheme, configuration: configuration, project: project)
 			return SignalProducer(result: filterResult.map { (platform, $0) })
 		}
