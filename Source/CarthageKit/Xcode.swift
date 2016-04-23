@@ -987,37 +987,58 @@ public func buildScheme(scheme: String, withConfiguration configuration: String,
 		.filter { _, sdks in
 			return !sdks.isEmpty
 		}
-//		.flatMap(.Concat) { platform, sdks -> SignalProducer<(Platform, [SDK]), CarthageError> in
-		.flatMap(.Concat) { platform, sdks -> SignalProducer<(Platform, [SDK], BuildSettings), CarthageError> in
-			debugPrint("platform: \(platform), sdks: \(sdks)")
-//			let filterResult = sdkFilter(sdks: sdks, scheme: scheme, configuration: configuration, project: project)
-			var argsForLoading = buildArgs
-			argsForLoading.sdk = sdk
+		.flatMap(.Concat) { platform, sdks -> SignalProducer<(Platform, [SDK]), CarthageError> in
+			// Load settings for each SDK
+			// If bitcode is disabled, filter out SDKs that require bitcode
 
-			BuildSettings.loadWithArguments(buildArgs)
-				.filter { settings in
-					// Only copy build products for the framework type we care about.
-					if let frameworkType = settings.frameworkType.value {
-						return shouldBuildFrameworkType(frameworkType)
-					} else {
-						return false
+			debugPrint("platform: \(platform), sdks: \(sdks)")
+
+			let bitcodeSDKFilter: SDKFilterCallback = { sdks, scheme, configuration, project in
+				var filteredSDKs: [SDK] = []
+
+				for sdk in sdks {
+					var argsForLoading = buildArgs
+					argsForLoading.sdk = sdk
+
+					BuildSettings.loadWithArguments(buildArgs)
+					.filter { settings in
+						debugPrint("sdk: \(sdk)")
+						// If the framework target has bitcode enabled skip the device
+						// SDK for platforms that require bitcode.
+						if settings.bitcodeEnabled.value != true && [.tvOS, .watchOS].contains(sdk) {
+							return false
+						}
+						return true
+					}
+					.take(1)
+					.startWithNext() { next in
+						debugPrint("adding sdk: \(sdk)")
+						filteredSDKs.append(sdk)
 					}
 				}
 
+				return sdkFilter(sdks: filteredSDKs, scheme: scheme, configuration: configuration, project: project)
+			}
+
+			let filterResult = bitcodeSDKFilter(sdks: sdks, scheme: scheme, configuration: configuration, project: project)
+
+			debugPrint("filterResult: \(filterResult)")
 
 			return SignalProducer(result: filterResult.map { (platform, $0) })
 		}
-		.flatMap(.Concat) { platform, sdks, settings -> SignalProducer<(Platform, [SDK]), CarthageError> in
-
-			.filter { settings in
-				// Skip building for device when platform requires bitcode but bitcode is disabled
-				//						if [.tvOS, .watchOS].contains(sdk.platform) {
-				if [.tvOS, .watchOS].contains(sdk) && settings.bitcodeEnabled.value == false {
-					return false
-				}
-				return true
-		}
+//		.flatMap(.Concat) { platform, sdks, settings -> SignalProducer<(Platform, [SDK]), CarthageError> in
+//			// Filter out SDKs that require bitcode
+//
+//			.filter { settings in
+//				// Skip building for device when platform requires bitcode but bitcode is disabled
+//				//						if [.tvOS, .watchOS].contains(sdk.platform) {
+//				if [.tvOS, .watchOS].contains(sdk) && settings.bitcodeEnabled.value == false {
+//					return false
+//				}
+//				return true
+//		}
 		.filter { _, sdks in
+			debugPrint("sdks: \(sdks)")
 			return !sdks.isEmpty
 		}
 		.flatMap(.Concat) { platform, sdks -> SignalProducer<TaskEvent<NSURL>, CarthageError> in
